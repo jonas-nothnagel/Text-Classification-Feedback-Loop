@@ -12,6 +12,8 @@ from eli5 import show_prediction
 #streamlit
 import streamlit as st
 import SessionState
+from st_aggrid import AgGrid
+from st_aggrid import GridOptionsBuilder, AgGrid, GridUpdateMode, DataReturnMode, JsCode
 from load_css import local_css
 local_css("style.css")
 
@@ -77,7 +79,7 @@ categories = ""
 #title start page
 st.title('Machine Learning for Nature Climate Energy Portfolio')
 
-sdg = Image.open('../streamlit/logo.png')
+sdg = Image.open('../streamlit/logo_dark.png')
 st.sidebar.image(sdg, width=200)
 st.sidebar.title('Navigation')
 
@@ -130,6 +132,8 @@ if agree:
 text_input = st.text_input('Please Input your Text:')
 
 #define lists
+all_results_name = []
+all_results_score = []
 name = []
 hat = []
 number = []        
@@ -152,8 +156,8 @@ if text_input != '':
                         
                         #prune the long names to ensure proper loading
                         if len(category) > 50:
+                            #st.write("pruning the long name of category:", category)
                             category = category[0:20] 
-                            st.write(category)
                         else:
                             pass 
                         
@@ -173,12 +177,16 @@ if text_input != '':
                         clf = joblib.load('../models/tf_idf/tf_idf_only/'+category+'_'+'model.sav')
                         y_hat = clf.predict(vector_df)
                         y_prob = clf.predict_proba(vector_df)
-                        
+
                         if y_hat == 1:        
-                            element = st.write(category)
+
+                            all_results_name.append(category)
+                            all_results_score.append(y_prob[0][1].round(2)*100)
+
+                            #element = st.write(category)
                             number.append(df[category].sum(axis=0))
                             name.append(category)
-                            element = st.write("Yes with Confidence:", y_prob[0][1].round(2)*100, "%")                  
+                            #element = st.write("Yes with Confidence:", y_prob[0][1].round(2)*100, "%")                  
                             hat.append(y_prob[0][1].round(2)*100)
                             
                             results= dict(zip(name, hat))
@@ -204,55 +212,150 @@ if text_input != '':
                             last_5_10.append(last_5_10_list)
 
                         if y_hat == 0:
-                            element= st.write(category)
-                            element = st.write("No with Confidence:", y_prob[0][0].round(2)*100, "%")
+
+                            all_results_name.append(category)
+                            all_results_score.append(y_prob[0][1].round(2)*100)
+
+                            #element= st.write(category)
+                            #element = st.write("No with Confidence:", y_prob[0][0].round(2)*100, "%")
+
+                # make dataframe from all prediction results
+                df = pd.DataFrame(
+                    {'category': all_results_name,
+                    'confidence_score': all_results_score 
+                    })
+
+                # add decision column:
+                df['prediction'] = np.where(df['confidence_score']>= 50, "True", "False")
+                df['confidence_score'] = df['confidence_score'].astype(str) + "%"
+                df = df[['category', 'prediction', 'confidence_score']]
+
             else:
                 st.warning('No category is selected')
 
-    time.sleep(3)
-    placeholder.empty()
+    #time.sleep(3)
+    #placeholder.empty()
     if name != []:    
-        st.header("Suggested Categories:")
-        st.write('           ')
-        
-        
+        st.write("Prediction Results:")
+        #st.table(df)
+
+
+        #grid table
+        #Example controlers
+        st.sidebar.subheader("St-AgGrid example options")
+
+        sample_size = st.sidebar.number_input("rows", min_value=10, value=10)
+        grid_height = st.sidebar.number_input("Grid height", min_value=200, max_value=800, value=200)
+
+        return_mode = st.sidebar.selectbox("Return Mode", list(DataReturnMode.__members__), index=1)
+        return_mode_value = DataReturnMode.__members__[return_mode]
+
+        update_mode = st.sidebar.selectbox("Update Mode", list(GridUpdateMode.__members__), index=6)
+        update_mode_value = GridUpdateMode.__members__[update_mode]
+
+        #features
+        fit_columns_on_grid_load = st.sidebar.checkbox("Fit Grid Columns on Load")
+
+        enable_selection=st.sidebar.checkbox("Enable row selection", value=True)
+        if enable_selection:
+            st.sidebar.subheader("Selection options")
+            selection_mode = st.sidebar.radio("Selection Mode", ['single','multiple'])
+            
+            use_checkbox = st.sidebar.checkbox("Use check box for selection")
+            if use_checkbox:
+                groupSelectsChildren = st.sidebar.checkbox("Group checkbox select children", value=True)
+                groupSelectsFiltered = st.sidebar.checkbox("Group checkbox includes filtered", value=True)
+
+            if ((selection_mode == 'multiple') & (not use_checkbox)):
+                rowMultiSelectWithClick = st.sidebar.checkbox("Multiselect with click (instead of holding CTRL)", value=False)
+                if not rowMultiSelectWithClick:
+                    suppressRowDeselection = st.sidebar.checkbox("Suppress deselection (while holding CTRL)", value=False)
+                else:
+                    suppressRowDeselection=False
+            st.sidebar.text("___")
+
+
+        enable_pagination = st.sidebar.checkbox("Enable pagination", value=False)
+
+        if enable_pagination:
+            st.sidebar.subheader("Pagination options")
+            paginationAutoSize = st.sidebar.checkbox("Auto pagination size", value=True)
+            if not paginationAutoSize:
+                paginationPageSize = st.sidebar.number_input("Page size", value=5, min_value=0, max_value=sample_size)
+            st.sidebar.text("___")
+
+        #Infer basic colDefs from dataframe types
+        gb = GridOptionsBuilder.from_dataframe(df)
+
+        #customize gridOptions
+        gb.configure_default_column(groupable=True, value=True, enableRowGroup=True, aggFunc='sum', editable=True)
+
+        #configures last row to use custom styles based on cell's value, injecting JsCode on components front end
+        cellsytle_jscode = JsCode("""
+        function(params) {
+            if (params.value == 'A') {
+                return {
+                    'color': 'white',
+                    'backgroundColor': 'darkred'
+                }
+            } else {
+                return {
+                    'color': 'black',
+                    'backgroundColor': 'white'
+                }
+            }
+        };
+        """)
+
+        enable_sidebar = False
+
+        if enable_sidebar:
+            gb.configure_side_bar()
+
+        if enable_selection:
+            gb.configure_selection(selection_mode)
+            if use_checkbox:
+                gb.configure_selection(selection_mode, use_checkbox=True, groupSelectsChildren=groupSelectsChildren, groupSelectsFiltered=groupSelectsFiltered)
+            if ((selection_mode == 'multiple') & (not use_checkbox)):
+                gb.configure_selection(selection_mode, use_checkbox=False, rowMultiSelectWithClick=rowMultiSelectWithClick, suppressRowDeselection=suppressRowDeselection)
+
+        if enable_pagination:
+            if paginationAutoSize:
+                gb.configure_pagination(paginationAutoPageSize=True)
+            else:
+                gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=paginationPageSize)
+
+        gb.configure_grid_options(domLayout='normal')
+        gridOptions = gb.build()
+
+        #Display the grid
+        st.header("Ag-Grid")
+
+        grid_response = AgGrid(
+            df, 
+            gridOptions=gridOptions,
+            height=grid_height, 
+            width='100%',
+            data_return_mode=return_mode_value, 
+            update_mode=update_mode_value,
+            fit_columns_on_grid_load=fit_columns_on_grid_load,
+            allow_unsafe_jscode=True, #Set it to True to allow jsfunction to be injected
+            )
+
+        df = grid_response['data']
+        selected = grid_response['selected_rows']
+        selected_df = pd.DataFrame(selected)
+
+        st.table(selected_df)
+
         a = 0
+        st.write("Suggested Categories:")
         for key, value in results.items():
             new_df = clean_df
             st.write(key, 'with', value, '% confidence.')
-            if st.button("Correct?"):
-                get_data().append({"text": text_input, key: 1})
-            # st.write('Model was trained on', number[0], 'examples with accuracy (F1 Score) of:', scores_dict[key].round(2)*100, "%")
-            
-                
-            # st.write('Detailed Explanation of Prediction:')
-            # for item in top_5[a]:
-            #     green = "<span class='highlight green'>"+item+"</span>"
-            #     item = item
-            #     new_df = new_df.str.replace(item,green)
-                
-            # for item in last_5[a]:    
-            #     red = "<span class='highlight red'>"+item+"</span>"
-            #     item = " "+item+" "
-            #     new_df = new_df.str.replace(item,red)
-                
-            # for item in top_5_10[a]:
-            #     lightgreen = "<span class='highlight lightgreen'>"+item+"</span>"
-            #     item = " "+item+" "
-            #     new_df = new_df.str.replace(item,lightgreen)
-                
-            # for item in last_5_10[a]:
-            #     lightred = "<span class='highlight IndianRed'>"+item+"</span>"
-            #     item = " "+item+" "
-            #     new_df = new_df.str.replace(item,lightred)
-
-            # text = new_df[0]
-            # text = "<div>"+text+"</div>"
-            # st.markdown(text, unsafe_allow_html=True)
-            # st.write('           ')
-            # st.write('           ')
-            # st.write('           ')
-            
+            # if st.button("Correct?"):
+            #     get_data().append({"text": text_input, key: 1})
+           
             a = a+1
     else:
         t = "<div> <span class='highlight red'>Not enough confidence in any category.</div>"
@@ -262,7 +365,7 @@ if text_input != '':
 
 new_annotations = pd.DataFrame(get_data())
 
-st.write(pd.DataFrame(get_data()))
+#st.write(pd.DataFrame(get_data()))
 
 #%%
 st.write('           ')
@@ -277,3 +380,7 @@ if st.button("Run again!"):
 #%%
 from pathlib import Path
 p = Path('.')
+
+
+
+# https://share.streamlit.io/pablocfonseca/streamlit-aggrid/main/examples/example.py
