@@ -346,8 +346,6 @@ if text_input != "":
             cols = [cols[-1]] + cols[:-1]
             selected_df = selected_df[cols]
 
-            
-
             #store in firestore:
             selected_df = selected_df.astype(str)
             selected_df.index = selected_df.index.map(str)
@@ -361,20 +359,6 @@ if text_input != "":
     else:
         t = "<div> <span class='highlight red'>Not enough confidence in any category.</div>"
         st.markdown(t, unsafe_allow_html=True)        
-#%%
-# st.write('           ')
-# st.write('           ')
-# st.write('           ')
-# st.write('           ')
-# st.write('           ')
-# st.write('           ')
-# if st.button("Run again!"):
-#   session.run_id += 1
 
-#%%
-from pathlib import Path
-p = Path('.')
-
-
-
+# for AgGrid
 # https://share.streamlit.io/pablocfonseca/streamlit-aggrid/main/examples/example.py
